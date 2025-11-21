@@ -170,8 +170,8 @@ problem_12x12_snake_hard = {
 
 optimal_map = {
     "problem1": 8, "problem2": 20, "problem3": 28, "problem4": 13,
-    "problem5_deadend": None, "problem6": 8, "problem7": 20,
-    "problem_hard1": 31, "problem_hard2": 24, "problem_hard3": 42,
+    "problem5_deadend": None, "problem6": 8, "problem7": 21,
+    "problem_hard1": 31, "problem_hard2": 24, "problem_hard3": 24,
     "problem_hard4": 25, "problem_hard5": 29, "problem_hard6": 33,
     "problem_load": 65, "problem_10x10_single": 106,
     "problem_12x12_snake": 249, "problem_12x12_snake_hard": 343,
