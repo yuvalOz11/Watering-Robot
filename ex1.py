@@ -298,20 +298,56 @@ class WateringProblem(search.Problem):
         return h_pours + h_loads + max(h_mst, h_resource)
 
     def h_gbfs(self, node):
+        """
+        Aggressive Greedy Heuristic (Non-Admissible).
+        Focuses on maximizing 'Water Flow':
+        - Heavily rewards moving loaded robots closer to thirsty plants.
+        - Heavily penalizes remaining water needs.
+        """
         state = node.state
         total_score = 0
+        
+        # רשימת הרובוטים שיש להם מים כרגע (המשאב הכי יקר)
         loaded_robots_indices = [i for i, r in enumerate(state.robots) if r[3] > 0]
+        
+        # האם יש בכלל מים על הרובוטים?
+        has_water_on_board = len(loaded_robots_indices) > 0
         
         for i in range(len(state.plants)):
             plant = state.plants[i]
-            if plant[2] == 0: continue
-            dist = self.static_plant_to_tap_dist[i]
-            dist_map = self.plant_paths[i]
-            for r_idx in loaded_robots_indices:
-                r = state.robots[r_idx]
-                d = dist_map.get((r[1], r[2]), float('inf'))
-                if d < dist: dist = d
-            total_score += plant[2] * (dist + 1)
+            p_needed = plant[2]
+            
+            # אם הצמח לא צריך מים, הוא לא מעניין את GBFS
+            if p_needed == 0: continue
+            
+            # 1. מרחק ברירת מחדל: המרחק מהברז לצמח (חושב מראש)
+            # אנחנו מוסיפים '2' באופן מלאכותי כדי לייצג את עלות המילוי וההליכה הראשונית
+            min_dist = self.static_plant_to_tap_dist[i] + 2
+            
+            # 2. אם יש רובוט עם מים, נבדוק אם הוא קרוב יותר
+            # זה יוצר "גרדיאנט" שמושך רובוטים מלאים ליעד
+            if has_water_on_board:
+                dist_map = self.plant_paths[i] # המפה המדויקת של הצמח
+                for r_idx in loaded_robots_indices:
+                    r = state.robots[r_idx]
+                    # שליפה מהירה של המרחק האמיתי במבוך
+                    d = dist_map.get((r[1], r[2]), float('inf'))
+                    if d < min_dist:
+                        min_dist = d
+            
+            # הניקוד החמדן: כמות המים * המרחק
+            # זה גורם לאלגוריתם להעדיף לטפל בצמחים שצריכים הרבה מים וקרובים
+            total_score += p_needed * min_dist
+            
+        # בונוס קטן: אם הרובוטים ריקים לגמרי וצריך מים, 
+        # נוסיף את המרחק שלהם לברז כדי למשוך אותם לשם
+        if not has_water_on_board and total_score > 0:
+            min_dist_to_tap = float('inf')
+            for r in state.robots:
+                d = self.dist_to_nearest_tap.get((r[1], r[2]), float('inf'))
+                if d < min_dist_to_tap: min_dist_to_tap = d
+            total_score += min_dist_to_tap
+
         return total_score
 
 def create_watering_problem(game):
