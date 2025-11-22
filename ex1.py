@@ -173,7 +173,7 @@ class WateringProblem(search.Problem):
     def h_astar(self, node):
         state = node.state
 
-        # POUR lower bound
+        # ----- POUR lower bound -----
         total_needed = 0
         remaining_plants = []  # indices of plants still needing water
         for i, p in enumerate(state.plants):
@@ -192,16 +192,16 @@ class WateringProblem(search.Problem):
                 current_water += r[3]
                 loaded_robots_indices.append(i)
 
-        # LOAD lower bound 
+        # ----- LOAD lower bound -----
         deficit = total_needed - current_water
         if deficit < 0:
             deficit = 0
 
-        # MOVE lower bounds
+        R = len(state.robots)
+
+        # ----- MOVE lower bounds (safe MAX of bounds) -----
         lb_reachPlants = 0
         lb_transport = 0
-
-        sum_nearest_dists = 0
 
         for i in remaining_plants:
             plant = state.plants[i]
@@ -215,18 +215,13 @@ class WateringProblem(search.Problem):
                 if d < closest_robot_dist:
                     closest_robot_dist = d
 
-            # unreachable plant -> dead end
             if closest_robot_dist == float('inf'):
-                return float('inf')  
+                return float('inf')  # unreachable plant => dead end
 
-            # update reachPlants bound
             if closest_robot_dist > lb_reachPlants:
                 lb_reachPlants = closest_robot_dist
 
-            # accumulate for LB_avg
-            sum_nearest_dists += closest_robot_dist
-
-            # best source distance: nearest tap OR already-loaded robot
+            # best source distance for FIRST delivery: nearest tap OR loaded robot
             best_source_dist = self.static_plant_to_tap_dist[i]
             for r_idx in loaded_robots_indices:
                 r = state.robots[r_idx]
@@ -237,11 +232,22 @@ class WateringProblem(search.Problem):
             if best_source_dist == float('inf'):
                 return float('inf')
 
-            trips = (p_needed + self.max_capacity - 1) // self.max_capacity  
-            plant_transport = trips * best_source_dist
+            trips = (p_needed + self.max_capacity - 1) // self.max_capacity  # ceil
+            dist_tap = self.static_plant_to_tap_dist[i]
+
+            if R == 1:
+                # stronger admissible LB for single robot:
+                # first delivery + (trips-1) mandatory roundtrips to nearest tap
+                # plant->tap->plant costs at least 2*dist_tap each time
+                plant_transport = best_source_dist + (trips - 1) * 2 * dist_tap
+            else:
+                # multi-robot safe LB (no roundtrip assumption)
+                plant_transport = trips * best_source_dist
+
             if plant_transport > lb_transport:
                 lb_transport = plant_transport
 
+        # reachTap if we still need to fetch water
         lb_reachTap = 0
         if deficit > 0:
             min_dist_to_tap = float('inf')
@@ -252,12 +258,7 @@ class WateringProblem(search.Problem):
             if min_dist_to_tap != float('inf'):
                 lb_reachTap = min_dist_to_tap
 
-        # LB_avg for multi-robots
-        # even with perfect division, average robot must cover at least sum_nearest_dists / R moves
-        R = len(state.robots)
-        lb_avg = (sum_nearest_dists + R - 1) // R  # ceil
-
-        # MST cover bound 
+        # ----- MST cover bound (ONLY when there is ONE robot) -----
         lb_cover = 0
         if R == 1 and len(remaining_plants) >= 2:
             plant_positions = [(state.plants[i][0], state.plants[i][1]) for i in remaining_plants]
@@ -270,7 +271,7 @@ class WateringProblem(search.Problem):
                 if d < start_cost:
                     start_cost = d
 
-            # Prim MST on plants
+            # Prim MST on plants using BFS distances
             k = len(remaining_plants)
             in_mst = [False] * k
             min_edge = [float('inf')] * k
@@ -290,7 +291,6 @@ class WateringProblem(search.Problem):
 
                 i_v = remaining_plants[v]
                 dist_map_v = self.plant_paths[i_v]
-
                 for u in range(k):
                     if not in_mst[u]:
                         pos_u = plant_positions[u]
@@ -301,9 +301,23 @@ class WateringProblem(search.Problem):
             if start_cost != float('inf'):
                 lb_cover = start_cost + mst_cost
 
-        lb_moves = max(lb_reachPlants, lb_reachTap, lb_transport, lb_cover, lb_avg)
+        # ----- Diameter bound (ONLY when there is ONE robot) -----
+        lb_diameter = 0
+        if R == 1 and len(remaining_plants) >= 2:
+            for a in range(len(remaining_plants)):
+                i_a = remaining_plants[a]
+                dist_map_a = self.plant_paths[i_a]
+                for b in range(a + 1, len(remaining_plants)):
+                    i_b = remaining_plants[b]
+                    plant_b = state.plants[i_b]
+                    d = dist_map_a.get((plant_b[0], plant_b[1]), float('inf'))
+                    if d < float('inf') and d > lb_diameter:
+                        lb_diameter = d
+
+        lb_moves = max(lb_reachPlants, lb_reachTap, lb_transport, lb_cover, lb_diameter)
 
         return total_needed + deficit + lb_moves
+
 
 
     def h_gbfs(self, node):
