@@ -1,5 +1,6 @@
 import search
 import utils
+import math
 
 id = ["207810490"]
 
@@ -35,9 +36,11 @@ class WateringProblem(search.Problem):
         ROWS, COLS = initial['Size']
         WALLS = initial['Walls']
         
+        # --- 1. Parsing ---
         robots_list = []
         max_cap = 1 
         
+        # Cache action strings
         self.action_strings = {}
         
         for r_id, r_data in initial['Robots'].items():
@@ -45,12 +48,9 @@ class WateringProblem(search.Problem):
             if r_data[3] > max_cap:
                 max_cap = r_data[3]
             
-            self.action_strings[(r_id, "UP")] = f"UP{{{r_id}}}"
-            self.action_strings[(r_id, "DOWN")] = f"DOWN{{{r_id}}}"
-            self.action_strings[(r_id, "LEFT")] = f"LEFT{{{r_id}}}"
-            self.action_strings[(r_id, "RIGHT")] = f"RIGHT{{{r_id}}}"
-            self.action_strings[(r_id, "LOAD")] = f"LOAD{{{r_id}}}"
-            self.action_strings[(r_id, "POUR")] = f"POUR{{{r_id}}}"
+            # Pre-allocating strings
+            for action in ["UP", "DOWN", "LEFT", "RIGHT", "LOAD", "POUR"]:
+                self.action_strings[(r_id, action)] = f"{action}{{{r_id}}}"
 
         robots_list.sort()
         self.max_capacity = max_cap
@@ -73,6 +73,7 @@ class WateringProblem(search.Problem):
         
         search.Problem.__init__(self, initial_state)
 
+        # --- Maps ---
         self.taps_map = {}
         for idx, tap in enumerate(initial_state.taps):
             self.taps_map[(tap[0], tap[1])] = idx
@@ -81,12 +82,29 @@ class WateringProblem(search.Problem):
         for idx, plant in enumerate(initial_state.plants):
             self.plants_map[(plant[0], plant[1])] = idx
 
+        # --- 2. PRE-CALCULATION: BFS All-Pairs (Optimization) ---
+        # כדי לחשב MST מדויק, אנחנו צריכים לדעת מרחקים בין צמח לצמח, ובין צמח לברז.
+        
+        # א. מרחק מכל נקודה לברז הכי קרוב
         self.dist_to_nearest_tap = self._bfs_map([(t[0], t[1]) for t in taps_list])
 
+        # ב. מפות מרחקים מלאות לכל צמח (כדי לדעת מרחק בין צמח א' לצמח ב' דרך קירות)
         self.plant_paths = {}
         for i, p in enumerate(plants_list):
             self.plant_paths[i] = self._bfs_map([(p[0], p[1])])
 
+        # ג. מטריצת מרחקים בין צמחים (לשימוש ה-MST)
+        self.plant_to_plant_dist = {}
+        num_plants = len(plants_list)
+        for i in range(num_plants):
+            for j in range(i + 1, num_plants):
+                p2 = plants_list[j]
+                # המרחק בין צמח i לצמח j
+                dist = self.plant_paths[i].get((p2[0], p2[1]), float('inf'))
+                self.plant_to_plant_dist[(i, j)] = dist
+                self.plant_to_plant_dist[(j, i)] = dist
+
+        # ד. מרחק מכל צמח לברז הקרוב אליו
         self.static_plant_to_tap_dist = {}
         for i, p in enumerate(plants_list):
             p_pos = (p[0], p[1])
@@ -96,10 +114,12 @@ class WateringProblem(search.Problem):
         distances = {}
         queue = []
         visited = set()
+        
         for sp in start_points:
             distances[sp] = 0
             queue.append((sp, 0))
             visited.add(sp)
+            
         head = 0
         while head < len(queue):
             curr_pos, curr_dist = queue[head]
@@ -133,7 +153,6 @@ class WateringProblem(search.Problem):
                 new_robot_data = (r_id, new_x, new_y, r_load, r_cap)
                 new_robots = current_robots[:r_idx] + (new_robot_data,) + current_robots[r_idx+1:]
                 new_state = State(new_robots, state.taps, state.plants)
-                
                 successors.append((self.action_strings[(r_id, move_name)], new_state))
 
             # Load
@@ -171,161 +190,85 @@ class WateringProblem(search.Problem):
         return True
 
     def h_astar(self, node):
+        """
+        Admissible Heuristic using MST (Minimum Spanning Tree).
+        Cost = TotalPours + MST(ActivePlants + Source).
+        MST is a tight lower bound for visiting a set of points.
+        """
         state = node.state
-
-        # ----- POUR lower bound -----
         total_needed = 0
-        remaining_plants = []  # indices of plants still needing water
+        
+        active_plant_indices = []
         for i, p in enumerate(state.plants):
             if p[2] > 0:
                 total_needed += p[2]
-                remaining_plants.append(i)
-
-        if total_needed == 0:
+                active_plant_indices.append(i)
+        
+        if not active_plant_indices:
             return 0
 
-        # water currently on robots
-        current_water = 0
-        loaded_robots_indices = []
-        for i, r in enumerate(state.robots):
-            if r[3] > 0:
-                current_water += r[3]
-                loaded_robots_indices.append(i)
 
-        # ----- LOAD lower bound -----
-        deficit = total_needed - current_water
-        if deficit < 0:
-            deficit = 0
+        min_dists = {} # {plant_idx: dist_to_network}
+        
+        loaded_robots = [r for r in state.robots if r[3] > 0]
+        has_loaded_robot = len(loaded_robots) > 0
+        
+        for p_idx in active_plant_indices:
+            dist = self.static_plant_to_tap_dist[p_idx]
+            
+            if has_loaded_robot:
+                plant_map = self.plant_paths[p_idx]
+                for r in loaded_robots:
+                    d = plant_map.get((r[1], r[2]), float('inf'))
+                    if d < dist:
+                        dist = d
+            min_dists[p_idx] = dist
 
-        R = len(state.robots)
-
-        # ----- MOVE lower bounds (safe MAX of bounds) -----
-        lb_reachPlants = 0
-        lb_transport = 0
-
-        for i in remaining_plants:
-            plant = state.plants[i]
-            p_needed = plant[2]
-            dist_map = self.plant_paths[i]
-
-            # closest robot to this plant
-            closest_robot_dist = float('inf')
-            for r in state.robots:
-                d = dist_map.get((r[1], r[2]), float('inf'))
-                if d < closest_robot_dist:
-                    closest_robot_dist = d
-
-            if closest_robot_dist == float('inf'):
-                return float('inf')  # unreachable plant => dead end
-
-            if closest_robot_dist > lb_reachPlants:
-                lb_reachPlants = closest_robot_dist
-
-            # best source distance for FIRST delivery: nearest tap OR loaded robot
-            best_source_dist = self.static_plant_to_tap_dist[i]
-            for r_idx in loaded_robots_indices:
-                r = state.robots[r_idx]
-                d = dist_map.get((r[1], r[2]), float('inf'))
-                if d < best_source_dist:
-                    best_source_dist = d
-
-            if best_source_dist == float('inf'):
+        mst_cost = 0
+        visited = set()
+        
+        while len(visited) < len(active_plant_indices):          
+            best_node = -1
+            min_val = float('inf')
+            
+            for p_idx in active_plant_indices:
+                if p_idx not in visited:
+                    if min_dists[p_idx] < min_val:
+                        min_val = min_dists[p_idx]
+                        best_node = p_idx
+            
+            if best_node == -1: 
                 return float('inf')
+                
+            visited.add(best_node)
+            mst_cost += min_val
+            
+            # עדכון המרחקים לשאר הצמחים (Relaxation)
+            # עכשיו אפשר להגיע אליהם גם דרך הצמח החדש שהוספנו
+            for p_idx in active_plant_indices:
+                if p_idx not in visited:
+                    # המרחק בין הצמח החדש (best_node) לצמח השכן (p_idx)
+                    # נלקח מהמטריצה שחישבנו מראש ב-Init
+                    if best_node < p_idx:
+                        dist_between = self.plant_to_plant_dist.get((best_node, p_idx), float('inf'))
+                    else:
+                        dist_between = self.plant_to_plant_dist.get((p_idx, best_node), float('inf'))
+                    
+                    if dist_between < min_dists[p_idx]:
+                        min_dists[p_idx] = dist_between
 
-            trips = (p_needed + self.max_capacity - 1) // self.max_capacity  # ceil
-            dist_tap = self.static_plant_to_tap_dist[i]
-
-            if R == 1:
-                # stronger admissible LB for single robot:
-                # first delivery + (trips-1) mandatory roundtrips to nearest tap
-                # plant->tap->plant costs at least 2*dist_tap each time
-                plant_transport = best_source_dist + (trips - 1) * 2 * dist_tap
-            else:
-                # multi-robot safe LB (no roundtrip assumption)
-                plant_transport = trips * best_source_dist
-
-            if plant_transport > lb_transport:
-                lb_transport = plant_transport
-
-        # reachTap if we still need to fetch water
-        lb_reachTap = 0
-        if deficit > 0:
-            min_dist_to_tap = float('inf')
-            for r in state.robots:
-                d = self.dist_to_nearest_tap.get((r[1], r[2]), float('inf'))
-                if d < min_dist_to_tap:
-                    min_dist_to_tap = d
-            if min_dist_to_tap != float('inf'):
-                lb_reachTap = min_dist_to_tap
-
-        # ----- MST cover bound (ONLY when there is ONE robot) -----
-        lb_cover = 0
-        if R == 1 and len(remaining_plants) >= 2:
-            plant_positions = [(state.plants[i][0], state.plants[i][1]) for i in remaining_plants]
-
-            # start -> nearest plant
-            r0 = state.robots[0]
-            start_cost = float('inf')
-            for i in remaining_plants:
-                d = self.plant_paths[i].get((r0[1], r0[2]), float('inf'))
-                if d < start_cost:
-                    start_cost = d
-
-            # Prim MST on plants using BFS distances
-            k = len(remaining_plants)
-            in_mst = [False] * k
-            min_edge = [float('inf')] * k
-            min_edge[0] = 0
-            mst_cost = 0
-
-            for _ in range(k):
-                v = -1
-                best = float('inf')
-                for j in range(k):
-                    if not in_mst[j] and min_edge[j] < best:
-                        best = min_edge[j]
-                        v = j
-
-                in_mst[v] = True
-                mst_cost += best
-
-                i_v = remaining_plants[v]
-                dist_map_v = self.plant_paths[i_v]
-                for u in range(k):
-                    if not in_mst[u]:
-                        pos_u = plant_positions[u]
-                        dvu = dist_map_v.get(pos_u, float('inf'))
-                        if dvu < min_edge[u]:
-                            min_edge[u] = dvu
-
-            if start_cost != float('inf'):
-                lb_cover = start_cost + mst_cost
-
-        # ----- Diameter bound (ONLY when there is ONE robot) -----
-        lb_diameter = 0
-        if R == 1 and len(remaining_plants) >= 2:
-            for a in range(len(remaining_plants)):
-                i_a = remaining_plants[a]
-                dist_map_a = self.plant_paths[i_a]
-                for b in range(a + 1, len(remaining_plants)):
-                    i_b = remaining_plants[b]
-                    plant_b = state.plants[i_b]
-                    d = dist_map_a.get((plant_b[0], plant_b[1]), float('inf'))
-                    if d < float('inf') and d > lb_diameter:
-                        lb_diameter = d
-
-        lb_moves = max(lb_reachPlants, lb_reachTap, lb_transport, lb_cover, lb_diameter)
-
-        return total_needed + deficit + lb_moves
-
-
+        # עלות סופית: השפיכה (חובה) + השינוע המינימלי (MST)
+        # ה-MST מכסה גם את ההגעה הראשונית וגם את המעבר בין צמחים.
+        # כדי להיות סופר-קבילים (כי יש לנו כמה רובוטים), נחלק את ה-MST במספר הרובוטים?
+        # לא, כי צעדים לא מתבצעים במקביל. עדיין משלמים על כל צעד.
+        # אבל ליתר ביטחון, נשאיר את זה כמו שזה (חזק מאוד).
+        
+        return total_needed + mst_cost
 
     def h_gbfs(self, node):
-        """
-        GBFS remains aggressive (SUM).
-        """
         state = node.state
         total_score = 0
+        
         loaded_robots_indices = []
         for i, r in enumerate(state.robots):
             if r[3] > 0: loaded_robots_indices.append(i)
