@@ -1,8 +1,6 @@
 import time
-
 import ex1
 import search
-
 
 def run_problem(func, targs=(), kwargs=None):
     if kwargs is None:
@@ -15,7 +13,8 @@ def run_problem(func, targs=(), kwargs=None):
     return result
 
 
-# Problem definitions
+# --- Problem Definitions ---
+
 Problem_pdf = {
     "Size": (3, 3),
     "Walls": {(0, 1), (2, 1)},
@@ -202,12 +201,27 @@ def solve_problems(problem, algorithm, problem_name=None, optimal=None):
     if result and isinstance(result[0], search.Node):
         solve = result[0].path()[::-1]
         solution = [pi.action for pi in solve][1:]
-        print(f"The length of the solution is - \033[92m{len(solution)}\033[0m")
-        print("Solution:")
-        print(solution)
+        
+        # Check optimality for A*
+        length = len(solution)
+        status = ""
+        if algorithm == "astar" and optimal is not None:
+            if length == optimal:
+                status = "\033[92m[OPTIMAL]\033[0m"
+            elif length > optimal:
+                status = f"\033[91m[SUB-OPTIMAL] (Exp: {optimal})\033[0m"
+            else:
+                status = "\033[93m[BETTER?!]\033[0m"
+
+        print(f"The length of the solution is - \033[92m{length}\033[0m {status}")
+        # print("Solution:")
+        # print(solution)
         print()
     else:
-        print("No solution\n")
+        if optimal is None:
+            print("\033[92mNo solution (Correct)\033[0m\n")
+        else:
+            print("\033[91mNo solution (Failed)\033[0m\n")
 
 
 def main():

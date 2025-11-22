@@ -35,11 +35,25 @@ class WateringProblem(search.Problem):
         ROWS, COLS = initial['Size']
         WALLS = initial['Walls']
         
-        # Parsing & Sorting
         robots_list = []
+        max_cap = 1 
+        
+        self.action_strings = {}
+        
         for r_id, r_data in initial['Robots'].items():
             robots_list.append((r_id, r_data[0], r_data[1], r_data[2], r_data[3]))
+            if r_data[3] > max_cap:
+                max_cap = r_data[3]
+            
+            self.action_strings[(r_id, "UP")] = f"UP{{{r_id}}}"
+            self.action_strings[(r_id, "DOWN")] = f"DOWN{{{r_id}}}"
+            self.action_strings[(r_id, "LEFT")] = f"LEFT{{{r_id}}}"
+            self.action_strings[(r_id, "RIGHT")] = f"RIGHT{{{r_id}}}"
+            self.action_strings[(r_id, "LOAD")] = f"LOAD{{{r_id}}}"
+            self.action_strings[(r_id, "POUR")] = f"POUR{{{r_id}}}"
+
         robots_list.sort()
+        self.max_capacity = max_cap
         
         taps_list = []
         for loc, amount in initial['Taps'].items():
@@ -59,7 +73,6 @@ class WateringProblem(search.Problem):
         
         search.Problem.__init__(self, initial_state)
 
-        # Maps
         self.taps_map = {}
         for idx, tap in enumerate(initial_state.taps):
             self.taps_map[(tap[0], tap[1])] = idx
@@ -68,17 +81,38 @@ class WateringProblem(search.Problem):
         for idx, plant in enumerate(initial_state.plants):
             self.plants_map[(plant[0], plant[1])] = idx
 
-        # Pre-calc: Distance from each plant to closest tap
-        self.static_plant_to_tap_dist = {}
-        for p in plants_list:
-            p_x, p_y = p[0], p[1]
-            min_dist = float('inf')
-            for t in taps_list:
-                d = abs(p_x - t[0]) + abs(p_y - t[1])
-                if d < min_dist:
-                    min_dist = d
-            self.static_plant_to_tap_dist[(p_x, p_y)] = min_dist
+        self.dist_to_nearest_tap = self._bfs_map([(t[0], t[1]) for t in taps_list])
 
+        self.plant_paths = {}
+        for i, p in enumerate(plants_list):
+            self.plant_paths[i] = self._bfs_map([(p[0], p[1])])
+
+        self.static_plant_to_tap_dist = {}
+        for i, p in enumerate(plants_list):
+            p_pos = (p[0], p[1])
+            self.static_plant_to_tap_dist[i] = self.dist_to_nearest_tap.get(p_pos, float('inf'))
+
+    def _bfs_map(self, start_points):
+        distances = {}
+        queue = []
+        visited = set()
+        for sp in start_points:
+            distances[sp] = 0
+            queue.append((sp, 0))
+            visited.add(sp)
+        head = 0
+        while head < len(queue):
+            curr_pos, curr_dist = queue[head]
+            head += 1
+            cx, cy = curr_pos
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
+                nx, ny = cx + dx, cy + dy
+                if 0 <= nx < ROWS and 0 <= ny < COLS:
+                    if (nx, ny) not in WALLS and (nx, ny) not in visited:
+                        visited.add((nx, ny))
+                        distances[(nx, ny)] = curr_dist + 1
+                        queue.append(((nx, ny), curr_dist + 1))
+        return distances
 
     def successor(self, state):
         successors = []
@@ -92,7 +126,6 @@ class WateringProblem(search.Problem):
             moves = (("UP", -1, 0), ("DOWN", 1, 0), ("LEFT", 0, -1), ("RIGHT", 0, 1))
             for move_name, dx, dy in moves:
                 new_x, new_y = r_x + dx, r_y + dy
-                
                 if not (0 <= new_x < ROWS and 0 <= new_y < COLS): continue
                 if (new_x, new_y) in WALLS: continue
                 if (new_x, new_y) in robots_locs: continue
@@ -100,7 +133,8 @@ class WateringProblem(search.Problem):
                 new_robot_data = (r_id, new_x, new_y, r_load, r_cap)
                 new_robots = current_robots[:r_idx] + (new_robot_data,) + current_robots[r_idx+1:]
                 new_state = State(new_robots, state.taps, state.plants)
-                successors.append((f"{move_name}{{{r_id}}}", new_state))
+                
+                successors.append((self.action_strings[(r_id, move_name)], new_state))
 
             # Load
             if r_load < r_cap:
@@ -113,7 +147,7 @@ class WateringProblem(search.Problem):
                         new_tap_data = (t_tap[0], t_tap[1], t_tap[2] - 1)
                         new_taps = state.taps[:t_idx] + (new_tap_data,) + state.taps[t_idx+1:]
                         new_state = State(new_robots, new_taps, state.plants)
-                        successors.append((f"LOAD{{{r_id}}}", new_state))
+                        successors.append((self.action_strings[(r_id, "LOAD")], new_state))
 
             # Pour
             if r_load > 0:
@@ -126,7 +160,7 @@ class WateringProblem(search.Problem):
                         new_plant_data = (p_plant[0], p_plant[1], p_plant[2] - 1)
                         new_plants = state.plants[:p_idx] + (new_plant_data,) + state.plants[p_idx+1:]
                         new_state = State(new_robots, state.taps, new_plants)
-                        successors.append((f"POUR{{{r_id}}}", new_state))
+                        successors.append((self.action_strings[(r_id, "POUR")], new_state))
 
         return successors
 
@@ -137,109 +171,106 @@ class WateringProblem(search.Problem):
         return True
 
     def h_astar(self, node):
-        """
-        Improved Admissible Heuristic with "Deficit Penalty".
-        """
         state = node.state
+
+        # 1) remaining POURs
         total_needed = 0
-        current_water_on_robots = 0
-        max_min_dist = 0
-        
-        # נשתמש ברשימה מהירה כדי לא לרוץ פעמיים
-        loaded_robots = []
-        for r in state.robots:
+        for p in state.plants:
+            if p[2] > 0:
+                total_needed += p[2]
+
+        if total_needed == 0:
+            return 0
+
+        # water currently on robots
+        current_water = 0
+        loaded_robots_indices = []
+        for i, r in enumerate(state.robots):
             if r[3] > 0:
-                current_water_on_robots += r[3]
-                loaded_robots.append(r)
-        
-        # 1. חישוב עלות בסיסית (השקיה + הגעה לצמח ממקור מים)
-        for plant in state.plants:
+                current_water += r[3]
+                loaded_robots_indices.append(i)
+
+        # 2) remaining LOADs
+        deficit = total_needed - current_water
+        if deficit < 0:
+            deficit = 0
+
+        # 3) MOVE lower bounds (take MAX of safe bounds)
+        lb_reachPlants = 0
+        lb_transport = 0
+
+        for i, plant in enumerate(state.plants):
             p_needed = plant[2]
-            if p_needed == 0: continue
-            
-            total_needed += p_needed
-            p_x, p_y = plant[0], plant[1]
-            
-            # בסיס: מרחק מהברז
-            best_dist = self.static_plant_to_tap_dist.get((p_x, p_y), float('inf'))
-            
-            # שיפור: אם יש רובוט קרוב יותר
-            for r in loaded_robots:
-                dist = abs(r[1] - p_x) + abs(r[2] - p_y)
-                if dist < best_dist:
-                    best_dist = dist
-            
-            if best_dist != float('inf'):
-                if best_dist > max_min_dist:
-                    max_min_dist = best_dist
-            else:
-                return float('inf')
+            if p_needed == 0:
+                continue
 
-        # 2. "קנס הגירעון" (The Deficit Penalty)
-        # אם חסרים מים במערכת, חייבים ללכת לברז.
-        # נוסיף את המרחק המינימלי שרובוט כלשהו צריך לעבור כדי להגיע לברז כלשהו.
-        penalty_to_tap = 0
-        if total_needed > current_water_on_robots:
-            # חסרים מים, אז חייבים לבצע נסיעה לברז.
-            # נחפש את הרובוט שהכי קרוב לברז כלשהו.
-            min_dist_to_any_tap = float('inf')
-            
-            # שיפור: במקום לרוץ על כל הברזים, נרוץ רק על ברזים עם מים
-            # אבל כדי להיות מהירים, נניח שכל הברזים מלאים (זה Relaxed, אז זה קביל)
-            # או שנשתמש בחישוב מקדים אם הברזים לא זזים.
-            
-            # לצורך הריצה המהירה: נחשב מרחק לברז הכי קרוב לכל רובוט
-            # (אפשר לייעל את זה עוד עם חישוב מראש, אבל זה O(NumRobots * NumTaps))
-            
-            has_water_in_taps = False
-            for t in state.taps:
-                if t[2] > 0:
-                    has_water_in_taps = True
-                    for r in state.robots:
-                        # אופטימיזציה: אם הרובוט כבר על הברז, המרחק הוא 0
-                        d = abs(r[1] - t[0]) + abs(r[2] - t[1])
-                        if d < min_dist_to_any_tap:
-                            min_dist_to_any_tap = d
-                            if d == 0: break # אי אפשר פחות מזה
-                    if min_dist_to_any_tap == 0: break
-            
-            if not has_water_in_taps and current_water_on_robots < total_needed:
-                return float('inf') # אין מים בעולם
-                
-            if min_dist_to_any_tap != float('inf'):
-                penalty_to_tap = min_dist_to_any_tap
+            dist_map = self.plant_paths[i]
 
-        return total_needed + max_min_dist + penalty_to_tap
+            # closest robot to this plant (regardless of load)
+            closest_robot_dist = float('inf')
+            for r in state.robots:
+                d = dist_map.get((r[1], r[2]), float('inf'))
+                if d < closest_robot_dist:
+                    closest_robot_dist = d
+
+            if closest_robot_dist != float('inf') and closest_robot_dist > lb_reachPlants:
+                lb_reachPlants = closest_robot_dist
+
+            # best source distance: nearest tap OR loaded robot
+            best_source_dist = self.static_plant_to_tap_dist[i]
+            for r_idx in loaded_robots_indices:
+                r = state.robots[r_idx]
+                d = dist_map.get((r[1], r[2]), float('inf'))
+                if d < best_source_dist:
+                    best_source_dist = d
+
+            if best_source_dist == float('inf'):
+                return float('inf')  # unreachable plant
+
+            trips = (p_needed + self.max_capacity - 1) // self.max_capacity  # ceil
+            plant_transport = trips * best_source_dist
+            if plant_transport > lb_transport:
+                lb_transport = plant_transport
+
+        lb_reachTap = 0
+        if deficit > 0:
+            min_dist_to_tap = float('inf')
+            for r in state.robots:
+                d = self.dist_to_nearest_tap.get((r[1], r[2]), float('inf'))
+                if d < min_dist_to_tap:
+                    min_dist_to_tap = d
+            if min_dist_to_tap != float('inf'):
+                lb_reachTap = min_dist_to_tap
+
+        lb_moves = max(lb_reachPlants, lb_reachTap, lb_transport)
+
+        return total_needed + deficit + lb_moves
 
     def h_gbfs(self, node):
         """
-        Aggressive Greedy Heuristic.
-        Sums distances instead of taking max to force completion.
+        GBFS remains aggressive (SUM).
         """
         state = node.state
         total_score = 0
+        loaded_robots_indices = []
+        for i, r in enumerate(state.robots):
+            if r[3] > 0: loaded_robots_indices.append(i)
         
-        loaded_robots = [r for r in state.robots if r[3] > 0]
-        
-        for plant in state.plants:
+        for i in range(len(state.plants)):
+            plant = state.plants[i]
             if plant[2] == 0: continue
             
-            p_x, p_y = plant[0], plant[1]
+            dist_map = self.plant_paths[i]
+            dist = self.static_plant_to_tap_dist[i]
             
-            # מרחק בסיס לברז
-            dist = self.static_plant_to_tap_dist.get((p_x, p_y), float('inf'))
+            for r_idx in loaded_robots_indices:
+                r = state.robots[r_idx]
+                d = dist_map.get((r[1], r[2]), float('inf'))
+                if d < dist: dist = d
             
-            # אם יש רובוט קרוב
-            for r in loaded_robots:
-                r_dist = abs(r[1] - p_x) + abs(r[2] - p_y)
-                if r_dist < dist:
-                    dist = r_dist
-            
-            # הכפלה בכמות המים החסרה יוצרת "משיכה" חזקה לבעיות הגדולות
             total_score += plant[2] * (dist + 1)
             
         return total_score
 
 def create_watering_problem(game):
-    print("<<create_watering_problem")
     return WateringProblem(game)
