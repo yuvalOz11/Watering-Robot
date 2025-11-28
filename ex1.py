@@ -4,6 +4,11 @@ import math
 
 id = [207810490]
 
+# ------------------------------------------------------------------------------
+# AI Acknowledgement: Developed with AI assistance, focusing on ideation, 
+# debugging, and optimization.
+# ------------------------------------------------------------------------------
+
 # global variables
 WALLS = set()
 ROWS = 0
