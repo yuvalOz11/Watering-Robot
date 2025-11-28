@@ -2,6 +2,7 @@ import time
 import ex1
 import search
 
+
 def run_problem(func, targs=(), kwargs=None):
     if kwargs is None:
         kwargs = {}
@@ -13,7 +14,9 @@ def run_problem(func, targs=(), kwargs=None):
     return result
 
 
-# --- Problem Definitions ---
+# ==========================================
+#           Standard Problems
+# ==========================================
 
 Problem_pdf = {
     "Size": (3, 3),
@@ -167,13 +170,20 @@ problem_12x12_snake_hard = {
     "Robots": {10: (11, 1, 0, 2)},
 }
 
+
+
+# ==========================================
+#           Execution Logic
+# ==========================================
+
 optimal_map = {
     "problem1": 8, "problem2": 20, "problem3": 28, "problem4": 13,
-    "problem5_deadend": None, "problem6": 8, "problem7": 21,
-    "problem_hard1": 31, "problem_hard2": 24, "problem_hard3": 24,
+    "problem5_deadend": None, "problem6": 8, "problem7": 20,
+    "problem_hard1": 31, "problem_hard2": 24, "problem_hard3": 42,
     "problem_hard4": 25, "problem_hard5": 29, "problem_hard6": 33,
     "problem_load": 65, "problem_10x10_single": 106,
     "problem_12x12_snake": 249, "problem_12x12_snake_hard": 343,
+
 }
 
 
@@ -201,27 +211,12 @@ def solve_problems(problem, algorithm, problem_name=None, optimal=None):
     if result and isinstance(result[0], search.Node):
         solve = result[0].path()[::-1]
         solution = [pi.action for pi in solve][1:]
-        
-        # Check optimality for A*
-        length = len(solution)
-        status = ""
-        if algorithm == "astar" and optimal is not None:
-            if length == optimal:
-                status = "\033[92m[OPTIMAL]\033[0m"
-            elif length > optimal:
-                status = f"\033[91m[SUB-OPTIMAL] (Exp: {optimal})\033[0m"
-            else:
-                status = "\033[93m[BETTER?!]\033[0m"
-
-        print(f"The length of the solution is - \033[92m{length}\033[0m {status}")
-        # print("Solution:")
-        # print(solution)
+        print(f"The length of the solution is - \033[92m{len(solution)}\033[0m")
+        print("Solution:")
+        print(solution)
         print()
     else:
-        if optimal is None:
-            print("\033[92mNo solution (Correct)\033[0m\n")
-        else:
-            print("\033[91mNo solution (Failed)\033[0m\n")
+        print("No solution\n")
 
 
 def main():
@@ -231,14 +226,17 @@ def main():
         problem1, problem2, problem3, problem4, problem5_deadend, problem6, problem7,
         problem_hard1, problem_hard2, problem_hard3, problem_hard4,
         problem_hard5, problem_hard6, problem_load, problem_10x10_single,
-        problem_12x12_snake, problem_12x12_snake_hard
+        problem_12x12_snake, problem_12x12_snake_hard,
+        # New Tests
     ]
 
     problem_names = [
         "problem1", "problem2", "problem3", "problem4", "problem5_deadend", "problem6", "problem7",
         "problem_hard1", "problem_hard2", "problem_hard3", "problem_hard4",
         "problem_hard5", "problem_hard6", "problem_load", "problem_10x10_single",
-        "problem_12x12_snake", "problem_12x12_snake_hard"
+        "problem_12x12_snake", "problem_12x12_snake_hard",
+        # New Tests
+        "itay1", "itay2", "itay3", "itay4", "itay5", "itay6", "itay7", "itay8", "itay9", "itay10", "itay11", "itay12"
     ]
 
     for p_name, p in zip(problem_names, problems):

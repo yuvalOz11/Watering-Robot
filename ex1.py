@@ -2,7 +2,7 @@ import search
 import utils
 import math
 
-id = ["207810490"]
+id = [207810490]
 
 # global variables
 WALLS = set()
@@ -36,7 +36,6 @@ class WateringProblem(search.Problem):
         ROWS, COLS = initial['Size']
         WALLS = initial['Walls']
         
-        # --- 1. Parsing ---
         robots_list = []
         max_cap = 1 
         self.action_strings = {}
@@ -70,7 +69,6 @@ class WateringProblem(search.Problem):
         
         search.Problem.__init__(self, initial_state)
 
-        # --- Maps ---
         self.taps_map = {}
         for idx, tap in enumerate(initial_state.taps):
             self.taps_map[(tap[0], tap[1])] = idx
@@ -79,16 +77,12 @@ class WateringProblem(search.Problem):
         for idx, plant in enumerate(initial_state.plants):
             self.plants_map[(plant[0], plant[1])] = idx
 
-        # --- 2. PRE-CALCULATION: BFS ---
-        # מרחק מכל משבצת לברז הכי קרוב (כולל קירות)
         self.dist_to_nearest_tap = self._bfs_map([(t[0], t[1]) for t in taps_list])
 
-        # מפות מרחקים לכל צמח
         self.plant_paths = {}
         for i, p in enumerate(plants_list):
             self.plant_paths[i] = self._bfs_map([(p[0], p[1])])
 
-        # מטריצת מרחקים בין צמחים (ל-MST)
         self.plant_to_plant_dist = {}
         num_plants = len(plants_list)
         for i in range(num_plants):
@@ -98,7 +92,6 @@ class WateringProblem(search.Problem):
                 self.plant_to_plant_dist[(i, j)] = dist
                 self.plant_to_plant_dist[(j, i)] = dist
 
-        # מרחק סטטי מכל צמח לברז
         self.static_plant_to_tap_dist = {}
         for i, p in enumerate(plants_list):
             p_pos = (p[0], p[1])
@@ -134,7 +127,6 @@ class WateringProblem(search.Problem):
         for r_idx, robot in enumerate(current_robots):
             r_id, r_x, r_y, r_load, r_cap = robot
             
-            # Moves
             moves = (("UP", -1, 0), ("DOWN", 1, 0), ("LEFT", 0, -1), ("RIGHT", 0, 1))
             for move_name, dx, dy in moves:
                 new_x, new_y = r_x + dx, r_y + dy
@@ -147,7 +139,6 @@ class WateringProblem(search.Problem):
                 new_state = State(new_robots, state.taps, state.plants)
                 successors.append((self.action_strings[(r_id, move_name)], new_state))
 
-            # Load
             if r_load < r_cap:
                 if (r_x, r_y) in self.taps_map:
                     t_idx = self.taps_map[(r_x, r_y)]
@@ -160,7 +151,6 @@ class WateringProblem(search.Problem):
                         new_state = State(new_robots, new_taps, state.plants)
                         successors.append((self.action_strings[(r_id, "LOAD")], new_state))
 
-            # Pour
             if r_load > 0:
                 if (r_x, r_y) in self.plants_map:
                     p_idx = self.plants_map[(r_x, r_y)]
@@ -183,7 +173,7 @@ class WateringProblem(search.Problem):
 
     def h_astar(self, node):
         """
-        Corrected Hybrid Heuristic (Admissible).
+        Admissible Heuristic: Actions + MST + Global Trip Correction
         """
         state = node.state
         total_needed = 0
@@ -202,17 +192,17 @@ class WateringProblem(search.Problem):
         if not active_plant_indices:
             return 0
 
-        # --- 1. Action Costs ---
         h_pours = total_needed
-        # עלות טעינה רק עבור המים שחסרים
         h_loads = max(0, total_needed - current_held_water)
 
-        # --- 2. MST (Connectivity) ---
         min_dists = {} 
         has_loaded = len(loaded_robots) > 0
+        min_tap_dist_global = float('inf') 
         
         for p_idx in active_plant_indices:
             dist = self.static_plant_to_tap_dist[p_idx]
+            if dist < min_tap_dist_global: min_tap_dist_global = dist
+            
             if has_loaded:
                 plant_map = self.plant_paths[p_idx]
                 for r in loaded_robots:
@@ -244,110 +234,60 @@ class WateringProblem(search.Problem):
                     if dist_between < temp_dists[p_idx]:
                         temp_dists[p_idx] = dist_between
 
-        h_mst = mst_val
-
-        # --- 3. Resource Work (Fixed Admissibility) ---
-        # חישוב עלות שינוע לכל הטיפות, ואז הפחתת ה"זיכוי" על המים שיש ביד.
+        h_mst = mst_val      
+        h_trips = 0
+        total_deficit = max(0, total_needed - current_held_water)
         
-        # רשימת כל ה"משלוחים" הנדרשים (כמות מים, מרחק שינוע)
-        deliveries = []
-        for p_idx in active_plant_indices:
-            p_need = state.plants[p_idx][2]
-            dist_tap = self.static_plant_to_tap_dist[p_idx]
-            deliveries.append((dist_tap, p_need))
+        if total_deficit > 0:
+            total_trips_needed = math.ceil(total_deficit / self.max_capacity)
+            local_extra_trips = 0
+            for p_idx in active_plant_indices:
+                p_need = state.plants[p_idx][2]
+                trips = math.ceil(p_need / self.max_capacity)
+                if trips > 1:
+                    local_extra_trips += (trips - 1)
             
-        # מיון לפי מרחק יורד (הכי רחוק = הכי יקר)
-        # הנחה: המים שיש לנו ביד (חינם מבחינת שינוע מהברז) הולכים למשלוחים היקרים ביותר.
-        deliveries.sort(key=lambda x: x[0], reverse=True)
-        
-        h_resource = 0
-        water_credit = current_held_water
-        
-        for dist, amount in deliveries:
-            if water_credit >= amount:
-                # כל הכמות הזו מכוסה ע"י המים שביד -> עלות שינוע מהברז = 0
-                water_credit -= amount
-            else:
-                # חלק מכוסה, השאר חייב להגיע מהברז
-                amount_from_tap = amount - water_credit
-                water_credit = 0
-                
-                # חישוב עבודה: כמות חלקי קיבולת כפול מרחק
-                # שימוש ב-Ceil כדי לדייק במספר הנגלות לא עובד טוב עם הזיכוי החלקי,
-                # אז נשתמש בחישוב רציף שהוא חסם תחתון בטוח.
-                h_resource += (amount_from_tap / self.max_capacity) * dist
+            trips_covered = 1 + local_extra_trips
+            
+            missing_trips = max(0, total_trips_needed - trips_covered)
+            
+            if missing_trips > 0 and min_tap_dist_global != float('inf'):
+                h_trips = missing_trips * 2 * min_tap_dist_global
 
-        # חזרה לברז (Return Trips) עבור צמחים ספציפיים שחייבים הרבה מים
-        # (זה תוסף בטוח כי הוא נובע מנפח בלבד)
+        h_vol_penalty = 0
         for p_idx in active_plant_indices:
             needed = state.plants[p_idx][2]
+            dist_tap = self.static_plant_to_tap_dist[p_idx]
             trips = math.ceil(needed / self.max_capacity)
             if trips > 1:
-                dist_tap = self.static_plant_to_tap_dist[p_idx]
-                h_resource += (trips - 1) * 2 * dist_tap
+                h_vol_penalty += (trips - 1) * 2 * dist_tap
 
-        # קנס התחלתי (אם הכל ריק)
-        if h_loads > 0 and current_held_water == 0:
+        h_fetch = 0
+        if current_held_water == 0 and total_needed > 0:
              min_dist_to_tap = float('inf')
              for r in state.robots:
                 d = self.dist_to_nearest_tap.get((r[1], r[2]), float('inf'))
                 if d < min_dist_to_tap: min_dist_to_tap = d
              if min_dist_to_tap != float('inf'):
-                 h_resource += min_dist_to_tap
+                 h_fetch = min_dist_to_tap
 
-        return h_pours + h_loads + max(h_mst, h_resource)
+        return h_pours + h_loads + h_mst + h_vol_penalty + h_trips + h_fetch
 
     def h_gbfs(self, node):
-        """
-        Aggressive Greedy Heuristic (Non-Admissible).
-        Focuses on maximizing 'Water Flow':
-        - Heavily rewards moving loaded robots closer to thirsty plants.
-        - Heavily penalizes remaining water needs.
-        """
         state = node.state
         total_score = 0
-        
-        # רשימת הרובוטים שיש להם מים כרגע (המשאב הכי יקר)
         loaded_robots_indices = [i for i, r in enumerate(state.robots) if r[3] > 0]
-        
-        # האם יש בכלל מים על הרובוטים?
-        has_water_on_board = len(loaded_robots_indices) > 0
         
         for i in range(len(state.plants)):
             plant = state.plants[i]
-            p_needed = plant[2]
-            
-            # אם הצמח לא צריך מים, הוא לא מעניין את GBFS
-            if p_needed == 0: continue
-            
-            # 1. מרחק ברירת מחדל: המרחק מהברז לצמח (חושב מראש)
-            # אנחנו מוסיפים '2' באופן מלאכותי כדי לייצג את עלות המילוי וההליכה הראשונית
-            min_dist = self.static_plant_to_tap_dist[i] + 2
-            
-            # 2. אם יש רובוט עם מים, נבדוק אם הוא קרוב יותר
-            # זה יוצר "גרדיאנט" שמושך רובוטים מלאים ליעד
-            if has_water_on_board:
-                dist_map = self.plant_paths[i] # המפה המדויקת של הצמח
-                for r_idx in loaded_robots_indices:
-                    r = state.robots[r_idx]
-                    # שליפה מהירה של המרחק האמיתי במבוך
-                    d = dist_map.get((r[1], r[2]), float('inf'))
-                    if d < min_dist:
-                        min_dist = d
-            
-            # הניקוד החמדן: כמות המים * המרחק
-            # זה גורם לאלגוריתם להעדיף לטפל בצמחים שצריכים הרבה מים וקרובים
-            total_score += p_needed * min_dist
-            
-        # בונוס קטן: אם הרובוטים ריקים לגמרי וצריך מים, 
-        # נוסיף את המרחק שלהם לברז כדי למשוך אותם לשם
-        if not has_water_on_board and total_score > 0:
-            min_dist_to_tap = float('inf')
-            for r in state.robots:
-                d = self.dist_to_nearest_tap.get((r[1], r[2]), float('inf'))
-                if d < min_dist_to_tap: min_dist_to_tap = d
-            total_score += min_dist_to_tap
-
+            if plant[2] == 0: continue
+            dist = self.static_plant_to_tap_dist[i]
+            dist_map = self.plant_paths[i]
+            for r_idx in loaded_robots_indices:
+                r = state.robots[r_idx]
+                d = dist_map.get((r[1], r[2]), float('inf'))
+                if d < dist: dist = d
+            total_score += plant[2] * (dist + 1)
         return total_score
 
 def create_watering_problem(game):
