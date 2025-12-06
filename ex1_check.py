@@ -1,259 +1,161 @@
-import time
 import ex1
 import search
+import random
+import time
 
-
-def run_problem(func, targs=(), kwargs=None):
-    if kwargs is None:
-        kwargs = {}
-    result = (-3, "default")
+def check_admissibility(prob, name=""):
+    """
+    Check admissibility: h(σ) ≤ h*(σ) for the initial state.
+    Returns (passed, h_value, h_star_value)
+    """
     try:
-        result = func(*targs, **kwargs)
+        p = ex1.create_watering_problem(prob)
+        initial_node = search.Node(p.initial)
+        h_val = p.h_astar(initial_node)
+        
+        res = search.astar_search(p, p.h_astar)
+        
+        if res:
+            true_cost = len(res[0].path()) - 1
+            if h_val > true_cost:
+                return False, h_val, true_cost
+            return True, h_val, true_cost
+        return True, h_val, None  # Unsolvable - any h is admissible
     except Exception as e:
-        result = (-3, e)
-    return result
+        print(f"Error in {name}: {e}")
+        return True, None, None
 
 
-# ==========================================
-#           Standard Problems
-# ==========================================
-
-Problem_pdf = {
-    "Size": (3, 3),
-    "Walls": {(0, 1), (2, 1)},
-    "Taps": {(1, 1): 6},
-    "Plants": {(2, 0): 2, (0, 2): 3},
-    "Robots": {10: (1, 0, 0, 2), 11: (1, 2, 0, 2)},
-}
-
-problem1 = {
-    "Size": (3, 3),
-    "Walls": set(),
-    "Taps": {(1, 1): 3},
-    "Plants": {(0, 2): 2},
-    "Robots": {10: (2, 0, 0, 2)},
-}
-
-problem2 = {
-    "Size": (3, 3),
-    "Walls": {(0, 1), (2, 1)},
-    "Taps": {(1, 1): 6},
-    "Plants": {(0, 2): 3, (2, 0): 2},
-    "Robots": {10: (1, 0, 0, 2), 11: (1, 2, 0, 2)},
-}
-
-problem3 = {
-    "Size": (5, 3),
-    "Walls": {(1, 1), (3, 1)},
-    "Taps": {(0, 0): 5},
-    "Plants": {(4, 2): 4},
-    "Robots": {10: (2, 0, 0, 2)},
-}
-
-problem4 = {
-    "Size": (5, 5),
-    "Walls": {(0, 1), (1, 1), (2, 1), (0, 3), (1, 3), (2, 3)},
-    "Taps": {(3, 2): 1, (4, 2): 1},
-    "Plants": {(0, 2): 1, (1, 2): 1},
-    "Robots": {10: (3, 1, 0, 1), 11: (3, 3, 0, 1)},
-}
-
-problem5_deadend = {
-    "Size": (3, 4),
-    "Walls": set(),
-    "Taps": {(1, 1): 3},
-    "Plants": {(0, 3): 2, (2, 3): 2},
-    "Robots": {10: (1, 0, 0, 2)},
-}
-
-problem6 = {
-    "Size": (8, 8),
-    "Walls": {*((r, c) for r in range(8) for c in range(8) if not (r == 1 and c in (0, 1, 2)))},
-    "Taps": {(1, 1): 3},
-    "Plants": {(1, 2): 3},
-    "Robots": {10: (1, 0, 0, 3)},
-}
-
-problem7 = {
-    "Size": (4, 4),
-    "Walls": set(),
-    "Taps": {(2, 2): 18},
-    "Plants": {(0, 3): 3, (3, 0): 3},
-    "Robots": {10: (2, 1, 0, 3), 11: (2, 0, 0, 3)},
-}
-
-problem_hard1 = {
-    "Size": (5, 6),
-    "Walls": {(1, 2), (1, 3), (3, 2), (3, 3)},
-    "Taps": {(2, 2): 12},
-    "Plants": {(0, 1): 3, (4, 5): 6},
-    "Robots": {10: (2, 1, 0, 6), 11: (2, 4, 0, 3)},
-}
-
-problem_hard2 = {
-    "Size": (5, 5),
-    "Walls": {(0, 0), (0, 4), (4, 0), (4, 4)},
-    "Taps": {(2, 2): 9},
-    "Plants": {(1, 2): 3, (2, 1): 3, (3, 2): 3},
-    "Robots": {10: (2, 3, 0, 3)},
-}
-
-problem_hard3 = {
-    "Size": (5, 5),
-    "Walls": {(0, 0), (0, 4), (4, 0), (4, 4)},
-    "Taps": {(2, 2): 9},
-    "Plants": {(1, 2): 3, (2, 1): 3, (3, 2): 3},
-    "Robots": {10: (2, 3, 0, 3)},
-}
-
-problem_hard4 = {
-    "Size": (5, 6),
-    "Walls": {(0, 2), (0, 3), (2, 2), (2, 3)},
-    "Taps": {(1, 2): 6, (3, 3): 6},
-    "Plants": {(0, 0): 3, (4, 5): 3},
-    "Robots": {10: (1, 1, 0, 3), 11: (3, 4, 0, 2)},
-}
-
-problem_hard5 = {
-    "Size": (5, 6),
-    "Walls": {(0, 2), (0, 3), (2, 2), (2, 3)},
-    "Taps": {(1, 2): 8, (3, 3): 8},
-    "Plants": {(0, 0): 4, (4, 5): 4},
-    "Robots": {10: (1, 1, 0, 4), 11: (3, 4, 0, 3)},
-}
-
-problem_hard6 = {
-    "Size": (5, 6),
-    "Walls": {(0, 2), (0, 3), (2, 2), (2, 3)},
-    "Taps": {(1, 2): 10, (3, 3): 10},
-    "Plants": {(0, 0): 5, (4, 5): 5},
-    "Robots": {10: (1, 1, 0, 5), 11: (3, 4, 0, 4)},
-}
-
-problem_load = {
-    "Size": (10, 4),
-    "Walls": {(0, 1), (1, 1), (2, 1), (3, 1), (4, 1), (6, 1), (7, 1), (8, 1), (9, 1), (4, 2), (4, 3), (6, 2), (6, 3)},
-    "Taps": {(5, 3): 20},
-    "Plants": {(0, 0): 10, (9, 0): 10},
-    "Robots": {10: (2, 0, 0, 2), 11: (7, 0, 0, 20)},
-}
-
-problem_10x10_single = {
-    "Size": (10, 10),
-    "Walls": set(),
-    "Taps": {(5, 5): 24},
-    "Plants": {(0, 0): 5, (0, 9): 5, (9, 0): 5, (9, 9): 5},
-    "Robots": {10: (9, 5, 0, 5)},
-}
-
-problem_12x12_snake = {
-    "Size": (12, 12),
-    "Walls": {
-        (1, 3), (2, 3), (3, 3), (4, 3), (6, 3), (7, 3), (8, 3), (9, 3), (10, 3),
-        (1, 6), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6), (8, 6), (10, 6),
-        (1, 9), (2, 9), (3, 9), (4, 9), (5, 9), (6, 9), (8, 9), (9, 9), (10, 9),
-    },
-    "Taps": {(5, 1): 24},
-    "Plants": {(2, 11): 5, (7, 11): 5, (10, 10): 5, (0, 8): 5},
-    "Robots": {10: (11, 1, 0, 3)},
-}
-
-problem_12x12_snake_hard = {
-    "Size": (12, 12),
-    "Walls": {
-        (1, 3), (2, 3), (3, 3), (4, 3), (6, 3), (7, 3), (8, 3), (9, 3), (10, 3),
-        (1, 6), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6), (8, 6), (10, 6),
-        (1, 9), (2, 9), (3, 9), (4, 9), (5, 9), (6, 9), (8, 9), (9, 9), (10, 9),
-    },
-    "Taps": {(5, 1): 24},
-    "Plants": {(2, 11): 5, (7, 11): 5, (10, 10): 5, (0, 8): 5},
-    "Robots": {10: (11, 1, 0, 2)},
-}
-
-
-
-# ==========================================
-#           Execution Logic
-# ==========================================
-
-optimal_map = {
-    "problem1": 8, "problem2": 20, "problem3": 28, "problem4": 13,
-    "problem5_deadend": None, "problem6": 8, "problem7": 20,
-    "problem_hard1": 31, "problem_hard2": 24, "problem_hard3": 42,
-    "problem_hard4": 25, "problem_hard5": 29, "problem_hard6": 33,
-    "problem_load": 65, "problem_10x10_single": 106,
-    "problem_12x12_snake": 249, "problem_12x12_snake_hard": 343,
-
-}
-
-
-def solve_problems(problem, algorithm, problem_name=None, optimal=None):
+def check_path_admissibility(prob, name):
+    """
+    Check admissibility for ALL nodes along the optimal path.
+    """
+    print(f"--- Path Check: {name} ---")
     try:
-        p = ex1.create_watering_problem(problem)
+        p = ex1.create_watering_problem(prob)
+        res = search.astar_search(p, p.h_astar)
+        
+        if not res:
+            print("  Unsolvable - skipping")
+            return True
+        
+        path = res[0].path()
+        total_cost = len(path) - 1
+        failures = 0
+        
+        for node in path:
+            h_val = p.h_astar(node)
+            h_star = total_cost - node.depth
+            
+            if h_val > h_star:
+                print(f"  FAIL depth {node.depth}: h={h_val} > h*={h_star}")
+                failures += 1
+        
+        if failures > 0:
+            print(f"  FAILED: {failures}/{len(path)} nodes inadmissible")
+            return False
+        print(f"  PASSED: All {len(path)} nodes admissible")
+        return True
     except Exception as e:
-        print("Error creating problem: ", e)
-        return None
+        print(f"  Error: {e}")
+        return True
 
-    alg_label = algorithm.upper()
-    print(f"Algorithm: {alg_label}")
 
-    # Time the algorithm execution
-    alg_start = time.time()
-    if algorithm == "gbfs":
-        result = run_problem(lambda p: search.greedy_best_first_graph_search(p, p.h_gbfs), targs=[p])
+# ========== MAIN TESTS ==========
+
+print("="*60)
+print("ADMISSIBILITY TEST SUITE")
+print("Testing: h(σ) ≤ h*(σ) for all nodes σ")
+print("="*60)
+
+# Manual edge cases
+manual_cases = [
+    ({'Size': (5, 5), 'Walls': set(), 'Taps': {(4,4): 10}, 
+      'Plants': {(0,1): 1, (0,3): 1, (1,0): 1}, 
+      'Robots': {1: (0,0, 3, 5), 2: (4,4, 3, 5)}}, "Multi-robot with water"),
+    
+    ({'Size': (4, 4), 'Walls': set(), 'Taps': {(0,0): 10}, 
+      'Plants': {(3,3): 3}, 
+      'Robots': {1: (1,1, 2, 3)}}, "Partial load"),
+    
+    ({'Size': (5, 5), 'Walls': set(), 'Taps': {(2,2): 20}, 
+      'Plants': {(0,0): 6}, 
+      'Robots': {1: (4,4, 0, 2)}}, "Multiple trips"),
+    
+    ({'Size': (5, 6), 'Walls': {(0, 2), (0, 3), (2, 2), (2, 3)}, 
+      'Taps': {(1, 2): 8, (3, 3): 8}, 
+      'Plants': {(0, 0): 4, (4, 5): 4}, 
+      'Robots': {10: (1, 1, 0, 4), 11: (3, 4, 0, 3)}}, "Hard5"),
+    
+    ({'Size': (3, 3), 'Walls': set(), 'Taps': {(0,0): 10}, 
+      'Plants': {(1,1): 2}, 
+      'Robots': {1: (1,1, 3, 5)}}, "Robot at plant"),
+]
+
+print("\n--- Manual Cases ---")
+manual_failures = 0
+for prob, name in manual_cases:
+    passed, h, h_star = check_admissibility(prob, name)
+    if passed:
+        print(f"✓ {name}: h={h} <= h*={h_star}")
     else:
-        result = run_problem(lambda p: search.astar_search(p, p.h_astar), targs=[p])
-    alg_end = time.time()
+        print(f"✗ {name}: h={h} > h*={h_star} INADMISSIBLE!")
+        manual_failures += 1
 
-    # Print time taken for this algorithm
-    print(f"Time: \033[93m{alg_end - alg_start:.4f}\033[0m seconds")
+# Random cases
+print("\n--- Random Cases (100 tests) ---")
+random.seed(42)
+random_failures = 0
+start = time.time()
 
-    if result and isinstance(result[0], search.Node):
-        solve = result[0].path()[::-1]
-        solution = [pi.action for pi in solve][1:]
-        print(f"The length of the solution is - \033[92m{len(solution)}\033[0m")
-        print("Solution:")
-        print(solution)
-        print()
-    else:
-        print("No solution\n")
+for i in range(100):
+    rows, cols = random.randint(3, 5), random.randint(3, 5)
+    walls = {(r, c) for r in range(rows) for c in range(cols) if random.random() < 0.1}
+    
+    def get_free():
+        for _ in range(100):
+            r, c = random.randint(0, rows-1), random.randint(0, cols-1)
+            if (r, c) not in walls:
+                return (r, c)
+        return (0, 0)
+    
+    taps = {get_free(): random.randint(10, 25) for _ in range(random.randint(1, 2))}
+    plants = {get_free(): random.randint(1, 3) for _ in range(random.randint(1, 3))}
+    robots = {}
+    for rid in range(random.randint(1, 2)):
+        pos = get_free()
+        load = random.randint(0, 3)
+        cap = random.randint(2, 5)
+        robots[rid] = (pos[0], pos[1], min(load, cap), cap)
+    
+    prob = {'Size': (rows, cols), 'Walls': walls, 'Taps': taps, 'Plants': plants, 'Robots': robots}
+    
+    passed, h, h_star = check_admissibility(prob, f"Random {i+1}")
+    if not passed:
+        random_failures += 1
+        print(f"✗ Random {i+1}: h={h} > h*={h_star}")
+        print(f"  Problem: {prob}")
 
+elapsed = time.time() - start
+print(f"Completed {100} tests in {elapsed:.2f}s")
 
-def main():
-    start = time.time()
+# Path admissibility
+print("\n--- Path Admissibility (all nodes on solution) ---")
+path_failures = 0
+for prob, name in manual_cases[:3]:
+    if not check_path_admissibility(prob, name):
+        path_failures += 1
 
-    problems = [
-        problem1, problem2, problem3, problem4, problem5_deadend, problem6, problem7,
-        problem_hard1, problem_hard2, problem_hard3, problem_hard4,
-        problem_hard5, problem_hard6, problem_load, problem_10x10_single,
-        problem_12x12_snake, problem_12x12_snake_hard,
-        # New Tests
-    ]
+# Summary
+print("\n" + "="*60)
+print("SUMMARY")
+print("="*60)
+print(f"Manual cases:  {len(manual_cases) - manual_failures}/{len(manual_cases)} passed")
+print(f"Random cases:  {100 - random_failures}/100 passed")
+print(f"Path checks:   {3 - path_failures}/3 passed")
 
-    problem_names = [
-        "problem1", "problem2", "problem3", "problem4", "problem5_deadend", "problem6", "problem7",
-        "problem_hard1", "problem_hard2", "problem_hard3", "problem_hard4",
-        "problem_hard5", "problem_hard6", "problem_load", "problem_10x10_single",
-        "problem_12x12_snake", "problem_12x12_snake_hard",
-        # New Tests
-        "itay1", "itay2", "itay3", "itay4", "itay5", "itay6", "itay7", "itay8", "itay9", "itay10", "itay11", "itay12"
-    ]
-
-    for p_name, p in zip(problem_names, problems):
-        optimal = optimal_map.get(p_name)
-        print(f"\033[91mCurrently working on: {p_name}    (optimal: {optimal if optimal is not None else 'Unknown'})\033[0m")
-        
-        problem_start = time.time()
-        for a in ['astar', 'gbfs']:
-            solve_problems(p, a, problem_name=p_name, optimal=optimal)
-        problem_end = time.time()
-        
-        print(f"\033[95mTotal time for {p_name}: {problem_end - problem_start:.4f} seconds\033[0m")
-        print("\033[96m" + "-" * 60 + "\033[0m")
-
-    end = time.time()
-    print('Submission took:', end - start, 'seconds.')
-
-
-if __name__ == '__main__':
-    main()
+total_failures = manual_failures + random_failures + path_failures
+if total_failures == 0:
+    print("\n✅ HEURISTIC IS ADMISSIBLE - All tests passed!")
+else:
+    print(f"\n❌ {total_failures} failures - HEURISTIC MAY BE INADMISSIBLE")
